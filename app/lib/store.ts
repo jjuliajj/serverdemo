@@ -411,6 +411,19 @@ export function addCustomerRecord(cust: CustomerModel) {
   syncToServerdemoTable().catch(console.error);
 }
 
+export function updateCustomerRecord(updated: CustomerModel) {
+  const index = stateCustomers.findIndex(c => c.id === updated.id);
+  if (index !== -1) {
+    stateCustomers[index] = { ...stateCustomers[index], ...updated };
+    syncToServerdemoTable().catch(console.error);
+  }
+}
+
+export function deleteCustomerRecord(id: string) {
+  stateCustomers = stateCustomers.filter(c => c.id !== id);
+  syncToServerdemoTable().catch(console.error);
+}
+
 export function addOrderRecord(order: OrderModel) {
   stateOrders.push(order);
   syncToServerdemoTable().catch(console.error);

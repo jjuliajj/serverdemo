@@ -8,41 +8,50 @@ import {
   Users, 
   Plus, 
   Trash2, 
+  Edit,
   CheckCircle2, 
   RefreshCw, 
   ExternalLink,
-  Code2,
-  Database,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  X
 } from 'lucide-react';
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<'schema' | 'config' | 'customers' | 'json'>('schema');
+  const [activeTab, setActiveTab] = useState<'schema' | 'config' | 'customers'>('schema');
   const [columns, setColumns] = useState<any[]>([]);
   const [detailFields, setDetailFields] = useState<any[]>([]);
   const [config, setConfig] = useState<any>({ vatRate: 0.10, vipGoldDiscount: 0.05, vipDiamondDiscount: 0.10 });
-  const [jsonPreview, setJsonPreview] = useState<any>(null);
+  const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // Form states for adding new column
+  // Form states for adding new column / field
   const [newColKey, setNewColKey] = useState('');
   const [newColLabel, setNewColLabel] = useState('');
   const [newColType, setNewColType] = useState('text');
   const [newColTarget, setNewColTarget] = useState<'column' | 'field'>('column');
 
-  // Form state for adding new customer
-  const [newCustName, setNewCustName] = useState('');
-  const [newCustEmail, setNewCustEmail] = useState('');
-  const [newCustCity, setNewCustCity] = useState('Hà Nội');
-  const [newCustTaxCode, setNewCustTaxCode] = useState('');
-  const [newCustLoyalty, setNewCustLoyalty] = useState('500');
+  // Customer Form state (for Create & Edit)
+  const [showCustModal, setShowCustModal] = useState(false);
+  const [editingCustId, setEditingCustId] = useState<string | null>(null);
+  const [custForm, setCustForm] = useState({
+    id: '',
+    name: '',
+    email: '',
+    phone: '',
+    city: 'Hà Nội',
+    tier: 'Standard',
+    taxCode: '',
+    loyaltyPoints: '500',
+    salesRep: '',
+    shippingAddress: ''
+  });
 
   useEffect(() => {
     fetchSchemaData();
     fetchConfigData();
-    fetchJsonPreview();
+    fetchCustomersData();
   }, []);
 
   const fetchSchemaData = async () => {
@@ -66,11 +75,13 @@ export default function AdminPage() {
     }
   };
 
-  const fetchJsonPreview = async () => {
+  const fetchCustomersData = async () => {
     try {
-      const res = await fetch('/api/sdui/customers');
+      const res = await fetch('/api/admin/customers');
       const data = await res.json();
-      setJsonPreview(data);
+      if (Array.isArray(data)) {
+        setCustomers(data);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -101,7 +112,6 @@ export default function AdminPage() {
         setNewColKey('');
         setNewColLabel('');
         fetchSchemaData();
-        fetchJsonPreview();
       }
     } catch (err) {
       console.error(err);
@@ -124,7 +134,6 @@ export default function AdminPage() {
       });
       setMessage(`Đã xóa "${key}" khỏi SDUI Schema.`);
       fetchSchemaData();
-      fetchJsonPreview();
     } catch (err) {
       console.error(err);
     } finally {
@@ -162,7 +171,6 @@ export default function AdminPage() {
 
     setMessage(`Đã thêm bộ trường mẫu thành công! FE Shopdemo sẽ lập tức hiển thị các trường mới.`);
     fetchSchemaData();
-    fetchJsonPreview();
     setLoading(false);
   };
 
@@ -178,7 +186,6 @@ export default function AdminPage() {
       const data = await res.json();
       if (data.success) {
         setMessage('Đã cập nhật công thức tính toán tài chính & thuế thành công!');
-        fetchJsonPreview();
       }
     } catch (e) {
       console.error(e);
@@ -187,29 +194,89 @@ export default function AdminPage() {
     }
   };
 
-  const handleAddCustomer = async (e: React.FormEvent) => {
+  // Open modal for Create New Customer
+  const handleOpenCreateModal = () => {
+    setEditingCustId(null);
+    setCustForm({
+      id: `CUST-${Math.floor(Math.random() * 9000) + 1000}`,
+      name: '',
+      email: '',
+      phone: '',
+      city: 'Hà Nội',
+      tier: 'Standard',
+      taxCode: '',
+      loyaltyPoints: '500',
+      salesRep: '',
+      shippingAddress: ''
+    });
+    setShowCustModal(true);
+  };
+
+  // Open modal for Edit Existing Customer
+  const handleOpenEditModal = (cust: any) => {
+    setEditingCustId(cust.id);
+    setCustForm({
+      id: cust.id,
+      name: cust.name || '',
+      email: cust.email || '',
+      phone: cust.phone || '',
+      city: cust.city || 'Hà Nội',
+      tier: cust.tier || 'Standard',
+      taxCode: cust.taxCode || '',
+      loyaltyPoints: String(cust.loyaltyPoints ?? '0'),
+      salesRep: cust.salesRep || '',
+      shippingAddress: cust.shippingAddress || ''
+    });
+    setShowCustModal(true);
+  };
+
+  // Submit Create or Update Customer
+  const handleSaveCustomerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCustName) return;
+    if (!custForm.name) return;
+
+    setLoading(true);
+    try {
+      const action = editingCustId ? 'update' : 'create';
+      const res = await fetch('/api/admin/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          ...custForm,
+          loyaltyPoints: Number(custForm.loyaltyPoints) || 0
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMessage(data.message);
+        setShowCustModal(false);
+        fetchCustomersData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete Customer
+  const handleDeleteCustomer = async (id: string, name: string) => {
+    if (!confirm(`Bạn có chắc chắn muốn xóa khách hàng "${name}" (${id}) khỏi Database?`)) {
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/admin/customers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newCustName,
-          email: newCustEmail || 'demo@example.com',
-          city: newCustCity,
-          taxCode: newCustTaxCode || '0109998887',
-          loyaltyPoints: Number(newCustLoyalty) || 300,
-          tier: 'VIP Gold'
-        })
+        body: JSON.stringify({ action: 'delete', id })
       });
       const data = await res.json();
       if (data.success) {
-        setMessage(`Đã thêm khách hàng "${newCustName}" thành công vào Database!`);
-        setNewCustName('');
-        setNewCustEmail('');
-        fetchJsonPreview();
+        setMessage(data.message);
+        fetchCustomersData();
       }
     } catch (err) {
       console.error(err);
@@ -255,7 +322,7 @@ export default function AdminPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Banner Status */}
+        {/* Message Banner */}
         {message && (
           <div className="mb-6 p-4 bg-indigo-950/60 border border-indigo-500/30 rounded-xl flex items-center justify-between text-indigo-200 text-sm animate-fadeIn">
             <div className="flex items-center gap-2">
@@ -296,7 +363,7 @@ export default function AdminPage() {
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
-            <Users className="w-4 h-4" /> Thêm Khách Hàng / Dữ Liệu Demo
+            <Users className="w-4 h-4" /> Quản Lý Danh Sách Khách Hàng (CRUD)
           </button>
         </div>
 
@@ -532,80 +599,230 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB 3: CUSTOMER MANAGEMENT */}
+        {/* TAB 3: CUSTOMER CRUD MANAGEMENT */}
         {activeTab === 'customers' && (
-          <div className="max-w-2xl bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-6">
-            <div>
-              <h3 className="text-lg font-semibold text-white">Thêm Khách Hàng Mới Đi Kèm Trường Động</h3>
-              <p className="text-sm text-slate-400 mt-1">
-                Tạo một bản ghi mới với các trường dữ liệu tùy biến (Mã số thuế, Điểm thưởng...). Phía FE Shopdemo sẽ lập tức load bản ghi này theo đúng Schema.
-              </p>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-white">Quản Lý Danh Sách Khách Hàng (Firebase Realtime CRUD)</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  Mọi thao tác Thêm, Sửa, Xóa thông tin khách hàng dưới đây sẽ trực tiếp ghi vào Firebase node <strong className="text-indigo-300">/serverdemo</strong> và tự động cập nhật bên Shopdemo!
+                </p>
+              </div>
+              <button
+                onClick={handleOpenCreateModal}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-indigo-600/30 transition text-sm"
+              >
+                <Plus className="w-4 h-4" /> Thêm Khách Hàng Mới
+              </button>
             </div>
 
-            <form onSubmit={handleAddCustomer} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Tên khách hàng / Công ty</label>
-                <input
-                  type="text"
-                  placeholder="Ví dụ: Tập đoàn Công Nghệ ABC"
-                  value={newCustName}
-                  onChange={(e) => setNewCustName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  required
-                />
+            {/* Customers Table */}
+            <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-900/80 text-slate-400 font-semibold text-xs uppercase tracking-wider border-b border-slate-700/80">
+                      <th className="px-5 py-3.5">Mã KH</th>
+                      <th className="px-5 py-3.5">Tên Khách Hàng</th>
+                      <th className="px-5 py-3.5">Email</th>
+                      <th className="px-5 py-3.5">Số Điện Thoại</th>
+                      <th className="px-5 py-3.5">Tỉnh / Thành</th>
+                      <th className="px-5 py-3.5">Hạng</th>
+                      <th className="px-5 py-3.5">Mã Số Thuế</th>
+                      <th className="px-5 py-3.5">Điểm VIP</th>
+                      <th className="px-5 py-3.5 text-right">Thao Tác</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/60 text-slate-200">
+                    {customers.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-10 text-center text-slate-400">
+                          Chưa có dữ liệu khách hàng
+                        </td>
+                      </tr>
+                    ) : (
+                      customers.map((cust) => (
+                        <tr key={cust.id} className="hover:bg-slate-800/60 transition">
+                          <td className="px-5 py-4 font-mono text-indigo-300 font-semibold">{cust.id}</td>
+                          <td className="px-5 py-4 font-semibold text-white">{cust.name}</td>
+                          <td className="px-5 py-4 text-slate-300">{cust.email || '-'}</td>
+                          <td className="px-5 py-4 font-mono text-slate-300">{cust.phone || '-'}</td>
+                          <td className="px-5 py-4">{cust.city || '-'}</td>
+                          <td className="px-5 py-4">
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                              cust.tier === 'VIP Diamond' 
+                                ? 'bg-purple-900/60 text-purple-300 border border-purple-700' 
+                                : cust.tier === 'VIP Gold'
+                                ? 'bg-amber-900/60 text-amber-300 border border-amber-700'
+                                : 'bg-slate-800 text-slate-300 border border-slate-700'
+                            }`}>
+                              {cust.tier}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 font-mono text-slate-300">{cust.taxCode || '-'}</td>
+                          <td className="px-5 py-4 font-semibold text-amber-400">{cust.loyaltyPoints ?? 0}</td>
+                          <td className="px-5 py-4 text-right space-x-2 whitespace-nowrap">
+                            <button
+                              onClick={() => handleOpenEditModal(cust)}
+                              className="inline-flex items-center gap-1 bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded-lg border border-slate-600 transition"
+                            >
+                              <Edit className="w-3.5 h-3.5 text-indigo-300" /> Sửa
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCustomer(cust.id, cust.name)}
+                              className="inline-flex items-center gap-1 bg-rose-950/80 hover:bg-rose-900 text-rose-300 text-xs px-3 py-1.5 rounded-lg border border-rose-800/80 transition"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Xóa
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Email liên hệ</label>
-                  <input
-                    type="email"
-                    placeholder="contact@abc.vn"
-                    value={newCustEmail}
-                    onChange={(e) => setNewCustEmail(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Tỉnh/Thành phố</label>
-                  <input
-                    type="text"
-                    value={newCustCity}
-                    onChange={(e) => setNewCustCity(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Mã số thuế (Trường động)</label>
-                  <input
-                    type="text"
-                    placeholder="0108889991"
-                    value={newCustTaxCode}
-                    onChange={(e) => setNewCustTaxCode(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Điểm thưởng VIP (Trường động)</label>
-                  <input
-                    type="number"
-                    value={newCustLoyalty}
-                    onChange={(e) => setNewCustLoyalty(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                  />
+            {/* CREATE / EDIT CUSTOMER MODAL */}
+            {showCustModal && (
+              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+                <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-6 shadow-2xl space-y-6">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Users className="w-5 h-5 text-indigo-400" />
+                      {editingCustId ? `Chỉnh Sửa Khách Hàng (${editingCustId})` : 'Thêm Khách Hàng Mới'}
+                    </h3>
+                    <button onClick={() => setShowCustModal(false)} className="text-slate-400 hover:text-white p-1 rounded-lg">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSaveCustomerSubmit} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Tên khách hàng / Tên Công ty</label>
+                      <input
+                        type="text"
+                        placeholder="Ví dụ: Nguyễn Văn An hoặc Công Ty ABC"
+                        value={custForm.name}
+                        onChange={(e) => setCustForm({ ...custForm, name: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-300 mb-1">Email liên hệ</label>
+                        <input
+                          type="email"
+                          placeholder="an.nguyen@example.com"
+                          value={custForm.email}
+                          onChange={(e) => setCustForm({ ...custForm, email: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-300 mb-1">Số điện thoại</label>
+                        <input
+                          type="text"
+                          placeholder="0901234567"
+                          value={custForm.phone}
+                          onChange={(e) => setCustForm({ ...custForm, phone: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-300 mb-1">Tỉnh / Thành phố</label>
+                        <input
+                          type="text"
+                          placeholder="Hà Nội"
+                          value={custForm.city}
+                          onChange={(e) => setCustForm({ ...custForm, city: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-300 mb-1">Hạng Hội Viên</label>
+                        <select
+                          value={custForm.tier}
+                          onChange={(e: any) => setCustForm({ ...custForm, tier: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="Standard">Standard (Chuẩn)</option>
+                          <option value="VIP Gold">VIP Gold</option>
+                          <option value="VIP Diamond">VIP Diamond</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-300 mb-1">Mã Số Thuế (Trường động)</label>
+                        <input
+                          type="text"
+                          placeholder="0101234567"
+                          value={custForm.taxCode}
+                          onChange={(e) => setCustForm({ ...custForm, taxCode: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-300 mb-1">Điểm Tích Lũy VIP (Trường động)</label>
+                        <input
+                          type="number"
+                          value={custForm.loyaltyPoints}
+                          onChange={(e) => setCustForm({ ...custForm, loyaltyPoints: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Sale / Chuyên Viên Phụ Trách</label>
+                      <input
+                        type="text"
+                        placeholder="Phạm Thanh Hương"
+                        value={custForm.salesRep}
+                        onChange={(e) => setCustForm({ ...custForm, salesRep: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Địa Chỉ Giao Hàng Mặc Định</label>
+                      <input
+                        type="text"
+                        placeholder="123 Đường Lê Duẩn, Hoàn Kiếm, Hà Nội"
+                        value={custForm.shippingAddress}
+                        onChange={(e) => setCustForm({ ...custForm, shippingAddress: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setShowCustModal(false)}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-indigo-600/30 transition flex items-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> {editingCustId ? 'Lưu Cập Nhật' : 'Thêm Vào Database'}
+                      </button>
+                    </div>
+                  </form>
                 </div>
               </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-lg transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
-              >
-                <Plus className="w-4 h-4" /> Thêm Khách Hàng Vào Database
-              </button>
-            </form>
+            )}
           </div>
         )}
       </main>
