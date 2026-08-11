@@ -50,7 +50,7 @@ export interface SystemConfig {
   shippingFeeStandard: number; // 30000
 }
 
-// Initial Seed Data
+// Initial Seed Data (used ONLY when Firebase is completely empty)
 const initialCustomers: CustomerModel[] = [
   {
     id: 'CUST-001',
@@ -247,12 +247,12 @@ let orderColumns: SDUIColumn[] = [
   { key: 'paymentMethod', label: 'Phương thức thanh toán', type: 'text' }
 ];
 
-// In-Memory state for live rapid updates
+// Active State
 let stateCustomers = [...initialCustomers];
 let stateOrders = [...initialOrders];
 let stateConfig = { ...initialConfig };
 
-// Sync all state to Firebase under the node/table named 'serverdemo'
+// Sync state directly to Firebase under table/node 'serverdemo'
 export async function syncToServerdemoTable() {
   if (!firebaseInitialized) return;
 
@@ -268,28 +268,24 @@ export async function syncToServerdemoTable() {
     lastUpdated: new Date().toISOString()
   };
 
-  // Write to Realtime Database at node 'serverdemo'
   if (rtdb) {
     try {
       await rtdb.ref('serverdemo').set(serverdemoData);
-      console.log('Successfully synced state to Firebase Realtime Database node: /serverdemo');
     } catch (e) {
-      console.warn('Realtime Database write failed, trying Firestore...', e);
+      console.warn('Realtime Database sync warning:', e);
     }
   }
 
-  // Write to Firestore collection 'serverdemo'
   if (db) {
     try {
       await db.collection('serverdemo').doc('data').set(serverdemoData, { merge: true });
-      console.log('Successfully synced state to Firebase Firestore collection: serverdemo');
     } catch (e) {
-      console.error('Firestore write error:', e);
+      console.error('Firestore sync error:', e);
     }
   }
 }
 
-// Helper to seed Firebase if initialized & empty
+// Fetch & populate state directly from Firebase table 'serverdemo'
 export async function ensureFirebaseSeeded() {
   if (!firebaseInitialized) return;
 
@@ -297,31 +293,56 @@ export async function ensureFirebaseSeeded() {
     if (rtdb) {
       const snap = await rtdb.ref('serverdemo').once('value');
       if (!snap.exists()) {
-        console.log('Seeding initial node "serverdemo" in Firebase Realtime Database...');
         await syncToServerdemoTable();
+      } else {
+        const val = snap.val();
+        if (val) {
+          if (val.customers) stateCustomers = Object.values(val.customers);
+          if (val.orders) stateOrders = Object.values(val.orders);
+          if (val.config) stateConfig = val.config;
+          if (val.schemas) {
+            if (val.schemas.customerColumns) customerColumns = val.schemas.customerColumns;
+            if (val.schemas.customerDetailFields) customerDetailFields = val.schemas.customerDetailFields;
+            if (val.schemas.orderColumns) orderColumns = val.schemas.orderColumns;
+          }
+        }
       }
     } else if (db) {
       const doc = await db.collection('serverdemo').doc('data').get();
       if (!doc.exists) {
-        console.log('Seeding initial collection "serverdemo" in Firebase Firestore...');
         await syncToServerdemoTable();
+      } else {
+        const val = doc.data();
+        if (val) {
+          if (val.customers) stateCustomers = Object.values(val.customers);
+          if (val.orders) stateOrders = Object.values(val.orders);
+          if (val.config) stateConfig = val.config;
+          if (val.schemas) {
+            if (val.schemas.customerColumns) customerColumns = val.schemas.customerColumns;
+            if (val.schemas.customerDetailFields) customerDetailFields = val.schemas.customerDetailFields;
+            if (val.schemas.orderColumns) orderColumns = val.schemas.orderColumns;
+          }
+        }
       }
     }
   } catch (err) {
-    console.error('Error seeding Firebase serverdemo table:', err);
+    console.error('Error fetching/seeding Firebase serverdemo table:', err);
   }
 }
 
-// Memory / Firebase getter functions
+// Data Getters (always fetch from Firebase serverdemo table)
 export async function getCustomers(): Promise<CustomerModel[]> {
+  await ensureFirebaseSeeded();
   return stateCustomers;
 }
 
 export async function getCustomerById(id: string): Promise<CustomerModel | null> {
+  await ensureFirebaseSeeded();
   return stateCustomers.find(c => c.id === id) || null;
 }
 
 export async function getOrders(): Promise<OrderModel[]> {
+  await ensureFirebaseSeeded();
   return stateOrders;
 }
 
@@ -331,16 +352,17 @@ export async function getOrdersByCustomerId(customerId: string): Promise<OrderMo
 }
 
 export async function getConfig(): Promise<SystemConfig> {
+  await ensureFirebaseSeeded();
   return stateConfig;
 }
 
 export async function updateConfig(newConfig: Partial<SystemConfig>): Promise<SystemConfig> {
+  await ensureFirebaseSeeded();
   stateConfig = { ...stateConfig, ...newConfig };
-  syncToServerdemoTable().catch(console.error);
+  await syncToServerdemoTable();
   return stateConfig;
 }
 
-// Schema Management getters and modifiers
 export function getCustomerColumns(): SDUIColumn[] {
   return customerColumns;
 }
@@ -353,7 +375,6 @@ export function getOrderColumns(): SDUIColumn[] {
   return orderColumns;
 }
 
-// Dynamic schema modifications from Serverdemo Admin UI
 export function addCustomerColumn(col: SDUIColumn) {
   if (!customerColumns.some(c => c.key === col.key)) {
     customerColumns.push(col);

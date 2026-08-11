@@ -298,16 +298,6 @@ export default function AdminPage() {
           >
             <Users className="w-4 h-4" /> Thêm Khách Hàng / Dữ Liệu Demo
           </button>
-          <button
-            onClick={() => setActiveTab('json')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition ${
-              activeTab === 'json' 
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20' 
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Code2 className="w-4 h-4" /> Live SDUI JSON Inspector
-          </button>
         </div>
 
         {/* TAB 1: SDUI SCHEMA MANAGER */}
@@ -616,26 +606,6 @@ export default function AdminPage() {
                 <Plus className="w-4 h-4" /> Thêm Khách Hàng Vào Database
               </button>
             </form>
-          </div>
-        )}
-
-        {/* TAB 4: JSON INSPECTOR */}
-        {activeTab === 'json' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                <Code2 className="w-5 h-5 text-indigo-400" /> SDUI Payload Live JSON Served to FE
-              </h3>
-              <button
-                onClick={fetchJsonPreview}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700"
-              >
-                <RefreshCw className="w-3.5 h-3.5" /> Reload JSON
-              </button>
-            </div>
-            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 overflow-x-auto max-h-[600px] font-mono text-xs text-emerald-400 leading-relaxed shadow-inner">
-              <pre>{JSON.stringify(jsonPreview, null, 2)}</pre>
-            </div>
           </div>
         )}
       </main>
