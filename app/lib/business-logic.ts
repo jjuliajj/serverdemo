@@ -46,7 +46,7 @@ export async function calculateGlobalFinancials() {
     totalDiscountsGiven,
     activeCustomersCount,
     completedOrdersCount,
-    vatRatePercent: Math.round(config.vatRate * 100)
+    vatRatePercent: Math.round((config.vatRate || 0.10) * 100)
   };
 }
 
@@ -127,7 +127,6 @@ export async function buildCustomersListSDUI(): Promise<SDUIPageSchema> {
         emptyText: 'Chưa có dữ liệu khách hàng'
       }
     ],
-    // Store data inside schema response
     data: {
       customers: augmentedCustomers
     } as any
@@ -143,8 +142,30 @@ export async function buildCustomerDetailSDUI(customerId: string): Promise<SDUIP
 
   const stats = await calculateCustomerStats(customerId);
   const orders = await getOrdersByCustomerId(customerId);
-  const detailFields = getCustomerDetailFields();
+  const config = await getConfig();
+  const baseDetailFields = getCustomerDetailFields();
   const orderTableColumns = getOrderColumns();
+
+  const vatPercent = Math.round((config.vatRate || 0.10) * 100);
+  const discountPercent = customer.tier === 'VIP Diamond' 
+    ? Math.round((config.vipDiamondDiscount || 0.10) * 100)
+    : customer.tier === 'VIP Gold'
+    ? Math.round((config.vipGoldDiscount || 0.05) * 100)
+    : 0;
+
+  // Dynamically include any custom extra fields on customer profile
+  const detailFields = [...baseDetailFields];
+  const standardSystemKeys = ['id', 'name', 'email', 'phone', 'city', 'tier', 'joinedDate', 'notes'];
+  Object.keys(customer).forEach(key => {
+    if (!standardSystemKeys.includes(key) && !detailFields.some(f => f.key === key)) {
+      const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+      detailFields.push({
+        key: key,
+        label: label,
+        type: 'text'
+      });
+    }
+  });
 
   return {
     pageKey: 'customer_detail',
@@ -167,13 +188,13 @@ export async function buildCustomerDetailSDUI(customerId: string): Promise<SDUIP
           },
           {
             id: 'cust_vat_paid',
-            label: 'Thuế VAT Đã Đóng',
+            label: `Thuế VAT Đã Đóng (${vatPercent}%)`,
             value: stats.totalVatPaid,
             type: 'currency'
           },
           {
             id: 'cust_discount',
-            label: 'Ưu Đãi Đã Giảm Giá',
+            label: `Ưu Đãi Đã Giảm Giá (${discountPercent}%)`,
             value: stats.totalDiscounts,
             type: 'currency',
             changeType: 'positive'

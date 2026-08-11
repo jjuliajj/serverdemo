@@ -46,13 +46,13 @@ export interface FinancialRule {
   name: string;
   type: 'vat' | 'discount_tier' | 'shipping' | 'custom';
   target?: string;
-  value: number; // e.g. 0.10 for 10%
+  value: number;
   enabled: boolean;
   description?: string;
 }
 
 export interface SystemConfig {
-  vatRate: number; // 0.10 (10%) or 0.08 (8%)
+  vatRate: number; // 0.10 (10%) or 0.47 (47%)
   vipGoldDiscount: number; // 0.05 (5%)
   vipDiamondDiscount: number; // 0.10 (10%)
   freeShippingThreshold: number; // 5000000
@@ -199,7 +199,7 @@ const initialRules: FinancialRule[] = [
     target: 'VIP Gold',
     value: 0.05,
     enabled: true,
-    description: 'Giảm 5% tổng giá trị đơn hàng cho VIP Gold'
+    description: 'Giảm chiết khấu cho VIP Gold'
   },
   {
     id: 'rule-vip-diamond',
@@ -208,7 +208,7 @@ const initialRules: FinancialRule[] = [
     target: 'VIP Diamond',
     value: 0.10,
     enabled: true,
-    description: 'Giảm 10% tổng giá trị đơn hàng cho VIP Diamond'
+    description: 'Giảm chiết khấu cho VIP Diamond'
   },
   {
     id: 'rule-free-shipping',
@@ -297,19 +297,27 @@ let stateCustomers = [...initialCustomers];
 let stateOrders = [...initialOrders];
 let stateConfig = { ...initialConfig };
 
+// Automatically ensure any custom fields added to customers are registered in Detail Fields schema
+export function ensureCustomFieldsInDetailSchema(cust: CustomerModel) {
+  const systemKeys = ['id', 'name', 'email', 'phone', 'city', 'tier', 'joinedDate', 'notes'];
+  Object.keys(cust).forEach(key => {
+    if (!systemKeys.includes(key) && !customerDetailFields.some(f => f.key === key)) {
+      const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+      customerDetailFields.push({
+        key: key,
+        label: label,
+        type: 'text'
+      });
+    }
+  });
+}
+
 // Recalculates order VAT, discounts, shipping fees, and totals based on active Config Rules
-function applyConfigRulesToOrders() {
-  const vatRule = stateConfig.rules?.find(r => r.type === 'vat' && r.enabled);
-  const vatRate = vatRule ? vatRule.value : (stateConfig.vatRate ?? 0.10);
-
-  const vipGoldRule = stateConfig.rules?.find(r => r.type === 'discount_tier' && r.target === 'VIP Gold');
-  const vipGoldDiscount = (vipGoldRule && !vipGoldRule.enabled) ? 0 : (vipGoldRule ? vipGoldRule.value : (stateConfig.vipGoldDiscount ?? 0.05));
-
-  const vipDiamondRule = stateConfig.rules?.find(r => r.type === 'discount_tier' && r.target === 'VIP Diamond');
-  const vipDiamondDiscount = (vipDiamondRule && !vipDiamondRule.enabled) ? 0 : (vipDiamondRule ? vipDiamondRule.value : (stateConfig.vipDiamondDiscount ?? 0.10));
-
-  const shippingRule = stateConfig.rules?.find(r => r.type === 'shipping');
-  const freeShipThreshold = (shippingRule && !shippingRule.enabled) ? Infinity : (shippingRule ? shippingRule.value : (stateConfig.freeShippingThreshold ?? 5000000));
+export function applyConfigRulesToOrders() {
+  const vatRate = stateConfig.vatRate !== undefined ? stateConfig.vatRate : 0.10;
+  const vipGoldDiscount = stateConfig.vipGoldDiscount !== undefined ? stateConfig.vipGoldDiscount : 0.05;
+  const vipDiamondDiscount = stateConfig.vipDiamondDiscount !== undefined ? stateConfig.vipDiamondDiscount : 0.10;
+  const freeShipThreshold = stateConfig.freeShippingThreshold !== undefined ? stateConfig.freeShippingThreshold : 5000000;
 
   stateOrders = stateOrders.map(order => {
     const cust = stateCustomers.find(c => c.id === order.customerId);
@@ -322,7 +330,7 @@ function applyConfigRulesToOrders() {
     const subtotal = order.subtotal || 0;
     const vatAmount = Math.round(subtotal * vatRate);
     const discountAmount = Math.round(subtotal * discountRate);
-    const shippingFee = subtotal >= freeShipThreshold ? 0 : stateConfig.shippingFeeStandard;
+    const shippingFee = subtotal >= freeShipThreshold ? 0 : (stateConfig.shippingFeeStandard || 30000);
     const total = subtotal + vatAmount - discountAmount + shippingFee;
 
     return {
@@ -335,12 +343,14 @@ function applyConfigRulesToOrders() {
       total
     };
   });
+
+  // Ensure all customers have custom fields synced to schema
+  stateCustomers.forEach(c => ensureCustomFieldsInDetailSchema(c));
 }
 
 export async function syncToServerdemoTable() {
   if (!firebaseInitialized) return;
 
-  // Always apply calculations before syncing to Firebase!
   applyConfigRulesToOrders();
 
   const serverdemoData = {
@@ -458,7 +468,22 @@ export async function getConfig(): Promise<SystemConfig> {
 
 export async function updateConfig(newConfig: Partial<SystemConfig>): Promise<SystemConfig> {
   await ensureFirebaseSeeded();
-  stateConfig = { ...stateConfig, ...newConfig };
+  
+  stateConfig = { 
+    ...stateConfig, 
+    ...newConfig 
+  };
+
+  // Sync parameter inputs with rules array
+  if (stateConfig.rules) {
+    stateConfig.rules = stateConfig.rules.map(rule => {
+      if (rule.type === 'vat') return { ...rule, value: stateConfig.vatRate };
+      if (rule.type === 'discount_tier' && rule.target === 'VIP Gold') return { ...rule, value: stateConfig.vipGoldDiscount };
+      if (rule.type === 'discount_tier' && rule.target === 'VIP Diamond') return { ...rule, value: stateConfig.vipDiamondDiscount };
+      return rule;
+    });
+  }
+
   applyConfigRulesToOrders();
   await syncToServerdemoTable();
   return stateConfig;
@@ -508,11 +533,13 @@ export function addOrderColumn(col: SDUIColumn) {
 }
 
 export function addCustomerRecord(cust: CustomerModel) {
+  ensureCustomFieldsInDetailSchema(cust);
   stateCustomers.push(cust);
   syncToServerdemoTable().catch(console.error);
 }
 
 export function updateCustomerRecord(updated: CustomerModel) {
+  ensureCustomFieldsInDetailSchema(updated);
   const index = stateCustomers.findIndex(c => c.id === updated.id);
   if (index !== -1) {
     stateCustomers[index] = { ...stateCustomers[index], ...updated };
