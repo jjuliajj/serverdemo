@@ -14,6 +14,8 @@ import {
   ExternalLink,
   ShieldCheck,
   Sparkles,
+  ToggleLeft,
+  ToggleRight,
   X
 } from 'lucide-react';
 
@@ -21,21 +23,36 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<'schema' | 'config' | 'customers'>('schema');
   const [columns, setColumns] = useState<any[]>([]);
   const [detailFields, setDetailFields] = useState<any[]>([]);
-  const [config, setConfig] = useState<any>({ vatRate: 0.10, vipGoldDiscount: 0.05, vipDiamondDiscount: 0.10 });
+  const [config, setConfig] = useState<any>({ 
+    vatRate: 0.10, 
+    vipGoldDiscount: 0.05, 
+    vipDiamondDiscount: 0.10,
+    freeShippingThreshold: 5000000,
+    shippingFeeStandard: 30000,
+    rules: []
+  });
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // Form states for adding new column / field
+  // Form states for adding new column / field in SDUI Schema
   const [newColKey, setNewColKey] = useState('');
   const [newColLabel, setNewColLabel] = useState('');
   const [newColType, setNewColType] = useState('text');
   const [newColTarget, setNewColTarget] = useState<'column' | 'field'>('column');
 
+  // Form state for adding custom financial calculation rule
+  const [showAddRuleForm, setShowAddRuleForm] = useState(false);
+  const [newRuleName, setNewRuleName] = useState('');
+  const [newRuleType, setNewRuleType] = useState<'vat' | 'discount_tier' | 'shipping' | 'custom'>('custom');
+  const [newRuleTarget, setNewRuleTarget] = useState('All');
+  const [newRuleValue, setNewRuleValue] = useState('0.05');
+  const [newRuleDesc, setNewRuleDesc] = useState('');
+
   // Customer Form state (for Create & Edit)
   const [showCustModal, setShowCustModal] = useState(false);
   const [editingCustId, setEditingCustId] = useState<string | null>(null);
-  const [custForm, setCustForm] = useState({
+  const [custForm, setCustForm] = useState<any>({
     id: '',
     name: '',
     email: '',
@@ -45,8 +62,14 @@ export default function AdminPage() {
     taxCode: '',
     loyaltyPoints: '500',
     salesRep: '',
-    shippingAddress: ''
+    shippingAddress: '',
+    notes: ''
   });
+  // Custom extra dynamic fields for customer
+  const [customFieldsList, setCustomFieldsList] = useState<Array<{ key: string; label: string; value: string }>>([]);
+  const [newCustomKey, setNewCustomKey] = useState('');
+  const [newCustomLabel, setNewCustomLabel] = useState('');
+  const [newCustomVal, setNewCustomVal] = useState('');
 
   useEffect(() => {
     fetchSchemaData();
@@ -185,13 +208,55 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setMessage('Đã cập nhật công thức tính toán tài chính & thuế thành công!');
+        setMessage('Đã cập nhật công thức tính toán tài chính & thuế thành công! Shopdemo đã tự động tính lại tổng số tiền.');
+        fetchConfigData();
       }
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Toggle rule enable/disable
+  const handleToggleRule = (ruleId: string) => {
+    const updatedRules = (config.rules || []).map((r: any) => {
+      if (r.id === ruleId) return { ...r, enabled: !r.enabled };
+      return r;
+    });
+    setConfig({ ...config, rules: updatedRules });
+  };
+
+  // Remove rule
+  const handleRemoveRule = (ruleId: string) => {
+    const updatedRules = (config.rules || []).filter((r: any) => r.id !== ruleId);
+    setConfig({ ...config, rules: updatedRules });
+  };
+
+  // Add rule
+  const handleAddRule = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRuleName) return;
+
+    const newRule = {
+      id: `rule-${Date.now()}`,
+      name: newRuleName,
+      type: newRuleType,
+      target: newRuleTarget,
+      value: parseFloat(newRuleValue) || 0,
+      enabled: true,
+      description: newRuleDesc || 'Quy tắc tính toán tùy chỉnh'
+    };
+
+    const currentRules = config.rules || [];
+    setConfig({
+      ...config,
+      rules: [...currentRules, newRule]
+    });
+
+    setNewRuleName('');
+    setNewRuleDesc('');
+    setShowAddRuleForm(false);
   };
 
   // Open modal for Create New Customer
@@ -207,14 +272,31 @@ export default function AdminPage() {
       taxCode: '',
       loyaltyPoints: '500',
       salesRep: '',
-      shippingAddress: ''
+      shippingAddress: '',
+      notes: ''
     });
+    setCustomFieldsList([]);
     setShowCustModal(true);
   };
 
   // Open modal for Edit Existing Customer
   const handleOpenEditModal = (cust: any) => {
     setEditingCustId(cust.id);
+    const standardKeys = ['id', 'name', 'email', 'phone', 'city', 'tier', 'taxCode', 'loyaltyPoints', 'salesRep', 'shippingAddress', 'joinedDate', 'notes'];
+    
+    // Extract non-standard dynamic fields
+    const extra: Array<{ key: string; label: string; value: string }> = [];
+    Object.keys(cust).forEach(k => {
+      if (!standardKeys.includes(k) && typeof cust[k] !== 'object') {
+        const schemaField = detailFields.find(f => f.key === k);
+        extra.push({
+          key: k,
+          label: schemaField ? schemaField.label : k,
+          value: String(cust[k])
+        });
+      }
+    });
+
     setCustForm({
       id: cust.id,
       name: cust.name || '',
@@ -225,9 +307,47 @@ export default function AdminPage() {
       taxCode: cust.taxCode || '',
       loyaltyPoints: String(cust.loyaltyPoints ?? '0'),
       salesRep: cust.salesRep || '',
-      shippingAddress: cust.shippingAddress || ''
+      shippingAddress: cust.shippingAddress || '',
+      notes: cust.notes || ''
     });
+    setCustomFieldsList(extra);
     setShowCustModal(true);
+  };
+
+  // Add custom extra field inside Customer Modal
+  const handleAddCustomFieldToCust = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustomKey || !newCustomVal) return;
+
+    const keyClean = newCustomKey.trim().replace(/\s+/g, '_');
+    const labelClean = newCustomLabel.trim() || keyClean;
+
+    setCustomFieldsList([
+      ...customFieldsList,
+      { key: keyClean, label: labelClean, value: newCustomVal.trim() }
+    ]);
+
+    // Also proactively register field to SDUI detailFields if not existing
+    if (!detailFields.some(f => f.key === keyClean)) {
+      fetch('/api/admin/schema', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add',
+          target: 'customer_field',
+          data: { key: keyClean, label: labelClean, type: 'text' }
+        })
+      }).then(() => fetchSchemaData());
+    }
+
+    setNewCustomKey('');
+    setNewCustomLabel('');
+    setNewCustomVal('');
+  };
+
+  // Remove custom extra field inside Customer Modal
+  const handleRemoveCustomFieldFromCust = (key: string) => {
+    setCustomFieldsList(customFieldsList.filter(f => f.key !== key));
   };
 
   // Submit Create or Update Customer
@@ -237,15 +357,22 @@ export default function AdminPage() {
 
     setLoading(true);
     try {
-      const action = editingCustId ? 'update' : 'create';
+      const extraObj: Record<string, any> = {};
+      customFieldsList.forEach(f => {
+        extraObj[f.key] = f.value;
+      });
+
+      const payload = {
+        action: editingCustId ? 'update' : 'create',
+        ...custForm,
+        ...extraObj,
+        loyaltyPoints: Number(custForm.loyaltyPoints) || 0
+      };
+
       const res = await fetch('/api/admin/customers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          ...custForm,
-          loyaltyPoints: Number(custForm.loyaltyPoints) || 0
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (data.success) {
@@ -309,7 +436,7 @@ export default function AdminPage() {
 
           <div className="flex items-center space-x-4">
             <a 
-              href="http://localhost:3000" 
+              href="https://shopdemo-iota-three.vercel.app" 
               target="_blank" 
               rel="noreferrer"
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition shadow-md shadow-indigo-600/20"
@@ -539,63 +666,234 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB 2: BUSINESS LOGIC & TAX CONFIG */}
+        {/* TAB 2: BUSINESS LOGIC & CUSTOM FORMULA RULES */}
         {activeTab === 'config' && (
-          <div className="max-w-2xl bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-6">
-            <div>
-              <h3 className="text-lg font-semibold text-white">Cấu Hình Công Thức Thuế & Khuyến Mãi Phía Backend</h3>
-              <p className="text-sm text-slate-400 mt-1">
-                Thay đổi các tham số tính toán dưới đây. Phía Server sẽ tự động tính lại tổng doanh thu, thuế VAT và số tiền giảm giá trên từng đơn hàng gửi tới FE.
-              </p>
-            </div>
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Form parameters */}
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                    <Calculator className="w-5 h-5 text-indigo-400" /> Cấu Hình Tham Số Tính Toán
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Khi lưu, Server sẽ tính lại ngay tổng doanh thu, thuế VAT và số tiền giảm giá trên toàn bộ đơn hàng của FE.
+                  </p>
+                </div>
 
-            <form onSubmit={handleSaveConfig} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Tỷ Lệ Thuế VAT Standard (ví dụ 0.10 = 10%, 0.08 = 8%)</label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="0.5"
-                    value={config.vatRate || 0.10}
-                    onChange={(e) => setConfig({ ...config, vatRate: parseFloat(e.target.value) })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
-                  />
-                  <span className="text-indigo-400 font-bold text-lg">{Math.round((config.vatRate || 0.10) * 100)}%</span>
+                <form onSubmit={handleSaveConfig} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">Tỷ Lệ Thuế VAT Standard (ví dụ 0.10 = 10%)</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        value={config.vatRate !== undefined ? config.vatRate : 0.10}
+                        onChange={(e) => setConfig({ ...config, vatRate: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                      <span className="text-indigo-400 font-bold text-lg min-w-[50px] text-right">
+                        {Math.round((config.vatRate || 0) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">Chiết Khấu VIP Gold (ví dụ 0.05 = 5%)</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        value={config.vipGoldDiscount !== undefined ? config.vipGoldDiscount : 0.05}
+                        onChange={(e) => setConfig({ ...config, vipGoldDiscount: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                      <span className="text-amber-400 font-bold text-lg min-w-[50px] text-right">
+                        {Math.round((config.vipGoldDiscount || 0) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">Chiết Khấu VIP Diamond (ví dụ 0.10 = 10%)</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        value={config.vipDiamondDiscount !== undefined ? config.vipDiamondDiscount : 0.10}
+                        onChange={(e) => setConfig({ ...config, vipDiamondDiscount: parseFloat(e.target.value) || 0 })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                      <span className="text-purple-400 font-bold text-lg min-w-[50px] text-right">
+                        {Math.round((config.vipDiamondDiscount || 0) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 rounded-lg transition shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2"
+                  >
+                    <Calculator className="w-4 h-4" /> Lưu Công Thức & Tự Động Tính Tức Thì
+                  </button>
+                </form>
+              </div>
+
+              {/* Dynamic Calculation Rules Manager */}
+              <div className="lg:col-span-2 bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Danh Sách Quy Tắc Tính Toán Tùy Chỉnh (Rules Engine)</h3>
+                    <p className="text-xs text-slate-400 mt-1">Bật/tắt hoặc thêm bớt các quy tắc tính toán thu chi. Phía Server sẽ tự động áp dụng công thức mới.</p>
+                  </div>
+                  <button
+                    onClick={() => setShowAddRuleForm(!showAddRuleForm)}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition"
+                  >
+                    <Plus className="w-4 h-4" /> Thêm Quy Tắc Mới
+                  </button>
+                </div>
+
+                {/* Add Rule Form */}
+                {showAddRuleForm && (
+                  <form onSubmit={handleAddRule} className="p-4 bg-slate-950 border border-indigo-500/40 rounded-xl space-y-4 animate-fadeIn">
+                    <h4 className="text-sm font-semibold text-indigo-300">Tạo Quy Tắc Tính Toán Mới</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-slate-300 mb-1">Tên Quy Tắc</label>
+                        <input
+                          type="text"
+                          placeholder="Ví dụ: Giảm giá đặc biệt Khách VIP"
+                          value={newRuleName}
+                          onChange={(e) => setNewRuleName(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-300 mb-1">Loại Quy Tắc</label>
+                        <select
+                          value={newRuleType}
+                          onChange={(e: any) => setNewRuleType(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white"
+                        >
+                          <option value="vat">Thuế VAT (VAT Tax)</option>
+                          <option value="discount_tier">Chiết khấu Hạng (Tier Discount)</option>
+                          <option value="shipping">Vận chuyển (Shipping Fee)</option>
+                          <option value="custom">Quy tắc tùy chỉnh (Custom Rule)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-slate-300 mb-1">Đối tượng áp dụng</label>
+                        <input
+                          type="text"
+                          placeholder="Ví dụ: VIP Diamond hoặc Tất cả"
+                          value={newRuleTarget}
+                          onChange={(e) => setNewRuleTarget(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-300 mb-1">Giá trị áp dụng (Tỷ lệ % hoặc Số tiền)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.05"
+                          value={newRuleValue}
+                          onChange={(e) => setNewRuleValue(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-300 mb-1">Mô tả công thức</label>
+                      <input
+                        type="text"
+                        placeholder="Mô tả ngắn gọn quy tắc này áp dụng như thế nào"
+                        value={newRuleDesc}
+                        onChange={(e) => setNewRuleDesc(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddRuleForm(false)}
+                        className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg"
+                      >
+                        Thêm Vào Danh Sách Quy Tắc
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Rules List */}
+                <div className="space-y-3">
+                  {(config.rules || []).length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">Chưa có quy tắc tính toán tùy chỉnh nào.</p>
+                  ) : (
+                    (config.rules || []).map((rule: any) => (
+                      <div 
+                        key={rule.id} 
+                        className={`p-4 rounded-xl border transition flex items-center justify-between ${
+                          rule.enabled 
+                            ? 'bg-slate-900/80 border-slate-700' 
+                            : 'bg-slate-950/40 border-slate-800 opacity-60'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm text-white">{rule.name}</span>
+                            <span className="bg-slate-800 px-2 py-0.5 rounded text-[11px] font-mono text-indigo-300">
+                              {rule.type} {rule.target ? `(${rule.target})` : ''}
+                            </span>
+                            <span className="font-mono text-xs text-emerald-400 font-bold">
+                              Val: {rule.value}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">{rule.description || 'Không có mô tả'}</p>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <button
+                            onClick={() => handleToggleRule(rule.id)}
+                            className="flex items-center gap-1 text-xs font-semibold transition"
+                            title={rule.enabled ? "Tắt quy tắc" : "Bật quy tắc"}
+                          >
+                            {rule.enabled ? (
+                              <span className="flex items-center gap-1 text-emerald-400"><ToggleRight className="w-6 h-6" /> Đang Bật</span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-slate-500"><ToggleLeft className="w-6 h-6" /> Đã Tắt</span>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleRemoveRule(rule.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-400 rounded transition"
+                            title="Xóa hàng quy tắc này"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Mức Giảm Giá VIP Gold (0.05 = 5%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={config.vipGoldDiscount || 0.05}
-                  onChange={(e) => setConfig({ ...config, vipGoldDiscount: parseFloat(e.target.value) })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Mức Giảm Giá VIP Diamond (0.10 = 10%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={config.vipDiamondDiscount || 0.10}
-                  onChange={(e) => setConfig({ ...config, vipDiamondDiscount: parseFloat(e.target.value) })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-mono"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 rounded-lg transition shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2"
-              >
-                <Calculator className="w-4 h-4" /> Lưu Công Thức & Áp Dụng Toàn Hệ Thống
-              </button>
-            </form>
+            </div>
           </div>
         )}
 
@@ -684,10 +982,10 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* CREATE / EDIT CUSTOMER MODAL */}
+            {/* CREATE / EDIT CUSTOMER MODAL WITH DYNAMIC CUSTOM FIELDS */}
             {showCustModal && (
-              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-                <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-6 shadow-2xl space-y-6">
+              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn overflow-y-auto">
+                <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
                       <Users className="w-5 h-5 text-indigo-400" />
@@ -781,26 +1079,92 @@ export default function AdminPage() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">Sale / Chuyên Viên Phụ Trách</label>
-                      <input
-                        type="text"
-                        placeholder="Phạm Thanh Hương"
-                        value={custForm.salesRep}
-                        onChange={(e) => setCustForm({ ...custForm, salesRep: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                      />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-300 mb-1">Sale / Chuyên Viên Phụ Trách</label>
+                        <input
+                          type="text"
+                          placeholder="Phạm Thanh Hương"
+                          value={custForm.salesRep}
+                          onChange={(e) => setCustForm({ ...custForm, salesRep: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-300 mb-1">Địa Chỉ Giao Hàng Mặc Định</label>
+                        <input
+                          type="text"
+                          placeholder="123 Đường Lê Duẩn, Hoàn Kiếm, Hà Nội"
+                          value={custForm.shippingAddress}
+                          onChange={(e) => setCustForm({ ...custForm, shippingAddress: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">Địa Chỉ Giao Hàng Mặc Định</label>
-                      <input
-                        type="text"
-                        placeholder="123 Đường Lê Duẩn, Hoàn Kiếm, Hà Nội"
-                        value={custForm.shippingAddress}
-                        onChange={(e) => setCustForm({ ...custForm, shippingAddress: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-                      />
+                    {/* DYNAMIC CUSTOM EXTRA FIELDS FOR THIS CUSTOMER */}
+                    <div className="pt-4 border-t border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4 text-amber-400" /> Các Trường Tùy Chỉnh Động Của Khách Hàng Này ({customFieldsList.length})
+                        </h4>
+                      </div>
+
+                      {/* Custom fields list */}
+                      {customFieldsList.length > 0 && (
+                        <div className="space-y-2">
+                          {customFieldsList.map((f) => (
+                            <div key={f.key} className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
+                              <div>
+                                <span className="font-semibold text-white">{f.label}</span>
+                                <span className="font-mono text-indigo-300 ml-2">[{f.key}]</span>: <span className="text-emerald-300 font-semibold">{f.value}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCustomFieldFromCust(f.key)}
+                                className="text-slate-400 hover:text-red-400 p-1"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Form to add a new custom field on the fly */}
+                      <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
+                        <span className="text-[11px] font-semibold text-slate-400">+ Thêm 1 trường tùy chỉnh mới cho Khách hàng:</span>
+                        <div className="grid grid-cols-3 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Tên biến (e.g. bietDanh, stk)"
+                            value={newCustomKey}
+                            onChange={(e) => setNewCustomKey(e.target.value)}
+                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Nhãn UI (e.g. Biệt danh VIP)"
+                            value={newCustomLabel}
+                            onChange={(e) => setNewCustomLabel(e.target.value)}
+                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Giá trị nhập"
+                            value={newCustomVal}
+                            onChange={(e) => setNewCustomVal(e.target.value)}
+                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddCustomFieldToCust}
+                          className="w-full bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold py-1.5 rounded transition border border-slate-700 flex items-center justify-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Thêm Trường Tùy Chỉnh Này
+                        </button>
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-800">

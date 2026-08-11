@@ -9,7 +9,6 @@ export interface CustomerModel {
   city: string;
   tier: 'Standard' | 'VIP Gold' | 'VIP Diamond';
   joinedDate: string;
-  // Dynamic extra fields
   taxCode?: string;
   loyaltyPoints?: number;
   salesRep?: string;
@@ -42,15 +41,25 @@ export interface OrderModel {
   [key: string]: any;
 }
 
+export interface FinancialRule {
+  id: string;
+  name: string;
+  type: 'vat' | 'discount_tier' | 'shipping' | 'custom';
+  target?: string;
+  value: number; // e.g. 0.10 for 10%
+  enabled: boolean;
+  description?: string;
+}
+
 export interface SystemConfig {
   vatRate: number; // 0.10 (10%) or 0.08 (8%)
   vipGoldDiscount: number; // 0.05 (5%)
   vipDiamondDiscount: number; // 0.10 (10%)
   freeShippingThreshold: number; // 5000000
   shippingFeeStandard: number; // 30000
+  rules?: FinancialRule[];
 }
 
-// Initial Seed Data (used ONLY when Firebase is completely empty)
 const initialCustomers: CustomerModel[] = [
   {
     id: 'CUST-001',
@@ -108,7 +117,7 @@ const initialOrders: OrderModel[] = [
     subtotal: 39800000,
     vatRate: 0.10,
     vatAmount: 3980000,
-    discountRate: 0.10, // VIP Diamond 10%
+    discountRate: 0.10,
     discountAmount: 3980000,
     shippingFee: 0,
     total: 39800000,
@@ -146,7 +155,7 @@ const initialOrders: OrderModel[] = [
     subtotal: 9990000,
     vatRate: 0.10,
     vatAmount: 999000,
-    discountRate: 0.05, // VIP Gold 5%
+    discountRate: 0.05,
     discountAmount: 499500,
     shippingFee: 0,
     total: 10489500,
@@ -174,15 +183,52 @@ const initialOrders: OrderModel[] = [
   }
 ];
 
+const initialRules: FinancialRule[] = [
+  {
+    id: 'rule-vat-standard',
+    name: 'Thuế VAT Giá Trị Gia Tăng Standard',
+    type: 'vat',
+    value: 0.10,
+    enabled: true,
+    description: 'Áp dụng thuế VAT tiêu chuẩn cho mọi sản phẩm'
+  },
+  {
+    id: 'rule-vip-gold',
+    name: 'Chiết Khấu Hội Viên VIP Gold',
+    type: 'discount_tier',
+    target: 'VIP Gold',
+    value: 0.05,
+    enabled: true,
+    description: 'Giảm 5% tổng giá trị đơn hàng cho VIP Gold'
+  },
+  {
+    id: 'rule-vip-diamond',
+    name: 'Chiết Khấu Hội Viên VIP Diamond',
+    type: 'discount_tier',
+    target: 'VIP Diamond',
+    value: 0.10,
+    enabled: true,
+    description: 'Giảm 10% tổng giá trị đơn hàng cho VIP Diamond'
+  },
+  {
+    id: 'rule-free-shipping',
+    name: 'Miễn Phí Vận Chuyển Đơn > 5 Tr',
+    type: 'shipping',
+    value: 5000000,
+    enabled: true,
+    description: 'Freeship cho đơn hàng từ 5,000,000đ trở lên'
+  }
+];
+
 const initialConfig: SystemConfig = {
   vatRate: 0.10,
   vipGoldDiscount: 0.05,
   vipDiamondDiscount: 0.10,
   freeShippingThreshold: 5000000,
-  shippingFeeStandard: 30000
+  shippingFeeStandard: 30000,
+  rules: initialRules
 };
 
-// Initial Dynamic Column Configurations for Customers List & Order History
 let customerColumns: SDUIColumn[] = [
   { key: 'id', label: 'Mã KH', type: 'text', sortable: true },
   { key: 'name', label: 'Tên khách hàng', type: 'text', sortable: true },
@@ -247,14 +293,55 @@ let orderColumns: SDUIColumn[] = [
   { key: 'paymentMethod', label: 'Phương thức thanh toán', type: 'text' }
 ];
 
-// Active State
 let stateCustomers = [...initialCustomers];
 let stateOrders = [...initialOrders];
 let stateConfig = { ...initialConfig };
 
-// Sync state directly to Firebase under table/node 'serverdemo'
+// Recalculates order VAT, discounts, shipping fees, and totals based on active Config Rules
+function applyConfigRulesToOrders() {
+  const vatRule = stateConfig.rules?.find(r => r.type === 'vat' && r.enabled);
+  const vatRate = vatRule ? vatRule.value : (stateConfig.vatRate ?? 0.10);
+
+  const vipGoldRule = stateConfig.rules?.find(r => r.type === 'discount_tier' && r.target === 'VIP Gold');
+  const vipGoldDiscount = (vipGoldRule && !vipGoldRule.enabled) ? 0 : (vipGoldRule ? vipGoldRule.value : (stateConfig.vipGoldDiscount ?? 0.05));
+
+  const vipDiamondRule = stateConfig.rules?.find(r => r.type === 'discount_tier' && r.target === 'VIP Diamond');
+  const vipDiamondDiscount = (vipDiamondRule && !vipDiamondRule.enabled) ? 0 : (vipDiamondRule ? vipDiamondRule.value : (stateConfig.vipDiamondDiscount ?? 0.10));
+
+  const shippingRule = stateConfig.rules?.find(r => r.type === 'shipping');
+  const freeShipThreshold = (shippingRule && !shippingRule.enabled) ? Infinity : (shippingRule ? shippingRule.value : (stateConfig.freeShippingThreshold ?? 5000000));
+
+  stateOrders = stateOrders.map(order => {
+    const cust = stateCustomers.find(c => c.id === order.customerId);
+    const tier = cust?.tier || 'Standard';
+
+    let discountRate = 0;
+    if (tier === 'VIP Diamond') discountRate = vipDiamondDiscount;
+    else if (tier === 'VIP Gold') discountRate = vipGoldDiscount;
+
+    const subtotal = order.subtotal || 0;
+    const vatAmount = Math.round(subtotal * vatRate);
+    const discountAmount = Math.round(subtotal * discountRate);
+    const shippingFee = subtotal >= freeShipThreshold ? 0 : stateConfig.shippingFeeStandard;
+    const total = subtotal + vatAmount - discountAmount + shippingFee;
+
+    return {
+      ...order,
+      vatRate,
+      vatAmount,
+      discountRate,
+      discountAmount,
+      shippingFee,
+      total
+    };
+  });
+}
+
 export async function syncToServerdemoTable() {
   if (!firebaseInitialized) return;
+
+  // Always apply calculations before syncing to Firebase!
+  applyConfigRulesToOrders();
 
   const serverdemoData = {
     config: stateConfig,
@@ -285,7 +372,6 @@ export async function syncToServerdemoTable() {
   }
 }
 
-// Fetch & populate state directly from Firebase table 'serverdemo'
 export async function ensureFirebaseSeeded() {
   if (!firebaseInitialized) return;
 
@@ -299,12 +385,19 @@ export async function ensureFirebaseSeeded() {
         if (val) {
           if (val.customers) stateCustomers = Object.values(val.customers);
           if (val.orders) stateOrders = Object.values(val.orders);
-          if (val.config) stateConfig = val.config;
+          if (val.config) {
+            stateConfig = {
+              ...initialConfig,
+              ...val.config,
+              rules: val.config.rules || initialRules
+            };
+          }
           if (val.schemas) {
             if (val.schemas.customerColumns) customerColumns = val.schemas.customerColumns;
             if (val.schemas.customerDetailFields) customerDetailFields = val.schemas.customerDetailFields;
             if (val.schemas.orderColumns) orderColumns = val.schemas.orderColumns;
           }
+          applyConfigRulesToOrders();
         }
       }
     } else if (db) {
@@ -316,12 +409,19 @@ export async function ensureFirebaseSeeded() {
         if (val) {
           if (val.customers) stateCustomers = Object.values(val.customers);
           if (val.orders) stateOrders = Object.values(val.orders);
-          if (val.config) stateConfig = val.config;
+          if (val.config) {
+            stateConfig = {
+              ...initialConfig,
+              ...val.config,
+              rules: val.config.rules || initialRules
+            };
+          }
           if (val.schemas) {
             if (val.schemas.customerColumns) customerColumns = val.schemas.customerColumns;
             if (val.schemas.customerDetailFields) customerDetailFields = val.schemas.customerDetailFields;
             if (val.schemas.orderColumns) orderColumns = val.schemas.orderColumns;
           }
+          applyConfigRulesToOrders();
         }
       }
     }
@@ -330,7 +430,6 @@ export async function ensureFirebaseSeeded() {
   }
 }
 
-// Data Getters (always fetch from Firebase serverdemo table)
 export async function getCustomers(): Promise<CustomerModel[]> {
   await ensureFirebaseSeeded();
   return stateCustomers;
@@ -343,6 +442,7 @@ export async function getCustomerById(id: string): Promise<CustomerModel | null>
 
 export async function getOrders(): Promise<OrderModel[]> {
   await ensureFirebaseSeeded();
+  applyConfigRulesToOrders();
   return stateOrders;
 }
 
@@ -359,6 +459,7 @@ export async function getConfig(): Promise<SystemConfig> {
 export async function updateConfig(newConfig: Partial<SystemConfig>): Promise<SystemConfig> {
   await ensureFirebaseSeeded();
   stateConfig = { ...stateConfig, ...newConfig };
+  applyConfigRulesToOrders();
   await syncToServerdemoTable();
   return stateConfig;
 }
